@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { AgentState, AgentRole, SwarmConfig, DEFAULT_CONFIG, DEEPSEEK_SECRET_KEY } from './types';
+import { AgentState, AgentRole, SwarmConfig, DEFAULT_CONFIG, DEEPSEEK_SECRET_KEY, PipelineDefinition, CustomAgentDef, PipelineNode, PipelineConnection } from './types';
 
-const ROLE_DEFAULTS: Record<AgentRole, { name: string; systemPrompt: string; defaultModel: string }> = {
+const ROLE_DEFAULTS: Partial<Record<AgentRole, { name: string; systemPrompt: string; defaultModel: string }>> = {
   planner: {
     name: 'Planner',
     defaultModel: 'gpt-4.1',
@@ -80,6 +80,113 @@ export class AgentStore {
     }
   }
 
+  // ── Custom Agents ──
+  public getCustomAgents(): CustomAgentDef[] {
+    return this._context.globalState.get<CustomAgentDef[]>('swarm.customAgents', []);
+  }
+
+  public async saveCustomAgent(agent: CustomAgentDef): Promise<void> {
+    const agents = this.getCustomAgents();
+    const idx = agents.findIndex(a => a.id === agent.id);
+    if (idx !== -1) agents[idx] = agent;
+    else agents.push(agent);
+    await this._context.globalState.update('swarm.customAgents', agents);
+    this._onDidChange.fire();
+  }
+
+  public async deleteCustomAgent(id: string): Promise<void> {
+    const agents = this.getCustomAgents().filter(a => a.id !== id);
+    await this._context.globalState.update('swarm.customAgents', agents);
+    this._onDidChange.fire();
+  }
+
+  // ── Pipelines ──
+  public getPipelines(): PipelineDefinition[] {
+    const saved = this._context.globalState.get<PipelineDefinition[]>('swarm.pipelines');
+    if (saved && saved.length > 0) return saved;
+    // First run: seed with default pipelines
+    const defaults = this._createDefaultPipelines();
+    this._context.globalState.update('swarm.pipelines', defaults);
+    return defaults;
+  }
+
+  public async savePipeline(pipeline: PipelineDefinition): Promise<void> {
+    const pipelines = this.getPipelines().filter(p => p.id !== pipeline.id);
+    pipelines.push(pipeline);
+    await this._context.globalState.update('swarm.pipelines', pipelines);
+    this._onDidChange.fire();
+  }
+
+  public async deletePipeline(id: string): Promise<void> {
+    const pipelines = this.getPipelines().filter(p => p.id !== id && !p.builtIn);
+    await this._context.globalState.update('swarm.pipelines', pipelines);
+    this._onDidChange.fire();
+  }
+
+  public async resetPipelinesToDefault(): Promise<void> {
+    const defaults = this._createDefaultPipelines();
+    await this._context.globalState.update('swarm.pipelines', defaults);
+    this._onDidChange.fire();
+  }
+
+  // ── Agent Skills (cross-workspace, stored in globalState) ──
+  public getAgentSkills(): CustomAgentDef[] {
+    return this.getCustomAgents();
+  }
+
+  public saveAgentSkill(skill: CustomAgentDef): Promise<void> {
+    return this.saveCustomAgent(skill);
+  }
+
+  public deleteAgentSkill(id: string): Promise<void> {
+    return this.deleteCustomAgent(id);
+  }
+
+  private _createDefaultPipelines(): PipelineDefinition[] {
+    // Deep Mode: Planner → Architect → Coder → Arbitrator
+    const deepNodes: PipelineNode[] = [
+      { id: 'node-planner', agentId: 'agent-planner', label: 'Planner', position: { x: 300, y: 40 } },
+      { id: 'node-architect', agentId: 'agent-architect', label: 'Architect', position: { x: 300, y: 180 } },
+      { id: 'node-coder', agentId: 'agent-coder', label: 'Coder', position: { x: 300, y: 320 } },
+      { id: 'node-arbitrator', agentId: 'agent-arbitrator', label: 'Arbitrator', position: { x: 300, y: 460 } },
+    ];
+    const deepConns: PipelineConnection[] = [
+      { id: 'conn-pa', fromNodeId: 'node-planner', toNodeId: 'node-architect', fromPort: 'bottom', toPort: 'top', condition: 'always', enabled: true },
+      { id: 'conn-ac', fromNodeId: 'node-architect', toNodeId: 'node-coder', fromPort: 'bottom', toPort: 'top', condition: 'always', enabled: true },
+      { id: 'conn-ca', fromNodeId: 'node-coder', toNodeId: 'node-arbitrator', fromPort: 'bottom', toPort: 'top', condition: 'always', enabled: true },
+    ];
+
+    // Quick Mode: Planner+Coder combined → Arbitrator review
+    const quickNodes: PipelineNode[] = [
+      { id: 'node-combined', agentId: 'agent-coder', label: 'Planner + Coder', position: { x: 300, y: 40 } },
+      { id: 'node-arbitrator', agentId: 'agent-arbitrator', label: 'Arbitrator', position: { x: 300, y: 200 } },
+    ];
+    const quickConns: PipelineConnection[] = [
+      { id: 'conn-ca', fromNodeId: 'node-combined', toNodeId: 'node-arbitrator', fromPort: 'bottom', toPort: 'top', condition: 'always', enabled: true },
+    ];
+
+    return [
+      {
+        id: 'pipeline-deep',
+        name: 'Deep Mode (4 agents)',
+        description: 'Full pipeline: Planner → Architect → Coder → Arbitrator',
+        nodes: deepNodes,
+        connections: deepConns,
+        builtIn: true,
+        entryNodeId: 'node-planner',
+      },
+      {
+        id: 'pipeline-quick',
+        name: 'Quick Mode (2 agents)',
+        description: 'Combined Planner+Coder → Arbitrator review',
+        nodes: quickNodes,
+        connections: quickConns,
+        builtIn: true,
+        entryNodeId: 'node-combined',
+      },
+    ];
+  }
+
   // ── Config ──
   public getConfig(): SwarmConfig { return { ...this._config }; }
   public updateConfig(patch: Partial<SwarmConfig>) {
@@ -104,6 +211,7 @@ export class AgentStore {
         const providerDefault = this._config.provider === 'deepseek' ? deepseekDefault : copilotDefault;
         agent.modelId = this._config.arbitratorModel || providerDefault;
       }
+      // 'custom' role agents keep their own modelId — set when created
     });
   }
 
@@ -144,9 +252,10 @@ export class AgentStore {
     const savedConfig = this._context.globalState.get<SwarmConfig>('swarm.config');
     if (savedConfig) this._config = { ...DEFAULT_CONFIG, ...savedConfig };
 
-    // Create the fixed 4-agent setup
-    this._agents = (Object.keys(ROLE_DEFAULTS) as AgentRole[]).map(role => {
-      const def = ROLE_DEFAULTS[role];
+    // Create the fixed 4-agent setup (only built-in roles)
+    const builtInRoles: AgentRole[] = ['planner', 'architect', 'coder', 'arbitrator'];
+    this._agents = builtInRoles.map(role => {
+      const def = ROLE_DEFAULTS[role]!;
       return {
         id: `agent-${role}`,
         role,

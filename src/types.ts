@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-// ── Agent Roles (fixed 4-agent system) ──
-export type AgentRole = 'planner' | 'architect' | 'coder' | 'arbitrator';
+// ── Agent Roles (fixed 4-agent system + custom) ──
+export type AgentRole = 'planner' | 'architect' | 'coder' | 'arbitrator' | 'custom';
 
 export type AgentStatus = 'idle' | 'running' | 'success' | 'error' | 'stopped' | 'skipped';
 
@@ -33,15 +33,59 @@ export type ProviderType = 'github-copilot' | 'deepseek';
 // ── Swarm Modes ──
 export type SwarmMode = 'quick' | 'deep' | 'auto';
 
+// ── Pipeline Definitions ──
+export type EdgeConditionType = 'always' | 'on_success' | 'on_error';
+
+export interface PipelineNode {
+  id: string;
+  agentId: string;            // references an agent (e.g. 'agent-planner' or 'custom-xxx')
+  label?: string;              // display name override
+  position: { x: number; y: number };  // canvas position for visual editor
+  config?: { modelId?: string; systemPrompt?: string };
+}
+
+export interface PipelineConnection {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  fromPort: 'bottom' | 'right';
+  toPort: 'top' | 'left';
+  condition: EdgeConditionType;
+  enabled: boolean;            // toggle on/off
+  label?: string;
+}
+
+export interface PipelineDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: PipelineNode[];
+  connections: PipelineConnection[];
+  builtIn: boolean;
+  entryNodeId: string;         // which node to start from
+}
+
+export interface CustomAgentDef {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  modelId: string;
+  color?: string;
+}
+
+// Backward-compatible aliases
+export type PipelineStep = PipelineNode;
+export type PipelineEdge = PipelineConnection;
+
 // ── Pipeline State ──
-export type PipelinePhase = 'idle' | 'planning' | 'architecting' | 'coding' | 'arbitrating' | 'done' | 'error';
+export type PipelinePhase = 'idle' | 'planning' | 'architecting' | 'coding' | 'arbitrating' | 'done' | 'error' | 'running';
 
 export interface PipelineState {
   phase: PipelinePhase;
   mode: SwarmMode;       // Resolved mode (never 'auto' at runtime)
   taskType: TaskType;
-  activeAgents: AgentRole[];
-  completedAgents: AgentRole[];
+  activeAgents: string[];
+  completedAgents: string[];
   summary?: string;
 }
 
@@ -79,6 +123,9 @@ export interface SwarmState {
     unit: string;
   } | null;
   deepseekApiKey?: string;
+  pipelines?: PipelineDefinition[];
+  customAgents?: CustomAgentDef[];
+  agentSkills?: CustomAgentDef[];
 }
 
 // ── Legacy compat ──

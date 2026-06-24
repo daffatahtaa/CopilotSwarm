@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AgentStore } from './AgentStore';
-import { TaskType, SwarmMode, AgentRole, ProviderType, PipelineState, TASK_TYPE_META } from './types';
+import { TaskType, SwarmMode, AgentRole, ProviderType, PipelineState, PipelineDefinition, PipelineNode, PipelineConnection, TASK_TYPE_META } from './types';
 
 export class SwarmEngine {
   private _isStopped = false;
@@ -38,6 +38,7 @@ export class SwarmEngine {
     onChunk?: (agentId: string, chunk: string) => void,
     onAction?: (action: { type: 'pending', path: string, content: string }) => void,
     onPhaseChange?: (pipeline: PipelineState) => void,
+    pipelineId?: string,
   ) {
     this._isStopped = false;
     this._store.resetAll();
@@ -65,7 +66,18 @@ export class SwarmEngine {
       completedAgents: [],
     };
 
-    if (resolvedMode === 'quick') {
+    if (pipelineId) {
+      // Run a custom/user-selected pipeline
+      const pipelines = this._store.getPipelines();
+      const pipeDef = pipelines.find(p => p.id === pipelineId);
+      if (pipeDef) {
+        await this._runPipelineDefinition(pipeDef, fullObjective, context, pipeline, onChunk, onAction, onPhaseChange);
+      } else {
+        pipeline.phase = 'error';
+        pipeline.summary = `Pipeline "${pipelineId}" not found.`;
+        if (onPhaseChange) onPhaseChange({ ...pipeline });
+      }
+    } else if (resolvedMode === 'quick') {
       await this._runQuickMode(fullObjective, context, pipeline, onChunk, onAction, onPhaseChange);
     } else {
       await this._runDeepMode(fullObjective, context, pipeline, onChunk, onAction, onPhaseChange);
@@ -158,7 +170,7 @@ export class SwarmEngine {
     let history = context ? `\n--- SOURCE CONTEXT ---\n${context}\n---\n` : '';
 
     const roles: AgentRole[] = ['planner', 'architect', 'coder', 'arbitrator'];
-    const phaseMap: Record<AgentRole, PipelineState['phase']> = {
+    const phaseMap: Partial<Record<AgentRole, PipelineState['phase']>> = {
       planner: 'planning', architect: 'architecting', coder: 'coding', arbitrator: 'arbitrating'
     };
 
@@ -166,7 +178,7 @@ export class SwarmEngine {
       if (this._isStopped) break;
 
       const agent = this._store.getByRole(role)!;
-      pipeline.phase = phaseMap[role];
+      pipeline.phase = phaseMap[role] ?? 'running';
       pipeline.activeAgents = [role];
       if (onPhaseChange) onPhaseChange({ ...pipeline });
 
@@ -190,6 +202,98 @@ export class SwarmEngine {
 
     const arbAgent = this._store.getByRole('arbitrator');
     pipeline.summary = arbAgent?.lastResponse ? this._extractSummary(arbAgent.lastResponse) : 'Completed.';
+    if (onPhaseChange) onPhaseChange({ ...pipeline });
+  }
+
+  // ── Generic Pipeline Executor ──
+  private async _runPipelineDefinition(
+    pipeDef: PipelineDefinition,
+    objective: string, context: string,
+    pipeline: PipelineState,
+    onChunk?: (agentId: string, chunk: string) => void,
+    onAction?: (action: { type: 'pending', path: string, content: string }) => void,
+    onPhaseChange?: (pipeline: PipelineState) => void,
+  ) {
+    const allActions: { path: string, content: string }[] = [];
+    let history = context ? `\n--- SOURCE CONTEXT ---\n${context}\n---\n` : '';
+
+    // Build node and connection lookups
+    const nodeMap = new Map(pipeDef.nodes.map(n => [n.id, n]));
+    const connMap = new Map<string, PipelineConnection[]>();
+    for (const conn of pipeDef.connections) {
+      if (!conn.enabled) continue; // Skip disabled connections
+      const list = connMap.get(conn.fromNodeId) || [];
+      list.push(conn);
+      connMap.set(conn.fromNodeId, list);
+    }
+
+    let currentNodeId: string | null = pipeDef.entryNodeId;
+    const visited = new Set<string>();
+
+    while (currentNodeId && !visited.has(currentNodeId)) {
+      if (this._isStopped) break;
+      visited.add(currentNodeId);
+
+      const node = nodeMap.get(currentNodeId);
+      if (!node) break;
+
+      // Find the agent for this node
+      const agent = this._store.all().find(a => a.id === node.agentId);
+      if (!agent) {
+        pipeline.phase = 'error';
+        pipeline.summary = `Agent "${node.agentId}" not found.`;
+        if (onPhaseChange) onPhaseChange({ ...pipeline });
+        break;
+      }
+
+      // Update pipeline state for this step
+      pipeline.phase = 'running';
+      pipeline.activeAgents = [agent.role !== 'custom' ? agent.role : agent.id];
+      if (onPhaseChange) onPhaseChange({ ...pipeline });
+
+      // Special handling for combined Planner+Coder step (Quick Mode)
+      let systemPrompt = agent.systemPrompt;
+      if (node.id === 'step-combined') {
+        const plannerPrompt =
+          `You are a Senior Full-Stack Developer. Plan AND implement the solution in one pass.\n` +
+          `First, briefly outline your approach, then write the code immediately.\n` +
+          `DO NOT ask for permission. DO NOT say "I will now do X". Just provide the [WRITE_FILE] blocks.\n`;
+        systemPrompt = plannerPrompt + (agent.systemPrompt || '');
+        // Mark planner as success
+        const plannerAgent = this._store.getByRole('planner');
+        if (plannerAgent) this._store.patch(plannerAgent.id, { status: 'success', lastResponse: '(Combined with Coder in Quick Mode)' });
+        const archAgent = this._store.getByRole('architect');
+        if (archAgent) this._store.patch(archAgent.id, { status: 'skipped' });
+      }
+
+      const result = await this._runAgent(
+        agent.id, agent.modelId, systemPrompt,
+        objective, '', history, onChunk
+      );
+
+      const actions = await this._parsePendingActions(result);
+      for (const action of actions) {
+        this._upsertAction(allActions, action);
+        if (onAction) onAction({ type: 'pending', ...action });
+      }
+
+      history += `\n\n--- ${node.label || agent.name} OUTPUT ---\n${result}\n---`;
+
+      // Add to completed
+      const completedId = agent.role !== 'custom' ? agent.role : agent.id;
+      if (!pipeline.completedAgents.includes(completedId)) {
+        pipeline.completedAgents.push(completedId);
+      }
+
+      // Find next node via connections
+      const outgoing: PipelineConnection[] = connMap.get(currentNodeId) || [];
+      const nextConn: PipelineConnection | undefined = outgoing.find(c => c.condition === 'always' || c.condition === 'on_success');
+      currentNodeId = nextConn?.toNodeId ?? null;
+    }
+
+    pipeline.activeAgents = [];
+    pipeline.phase = this._isStopped ? 'error' : 'done';
+    pipeline.summary = this._extractSummary(history);
     if (onPhaseChange) onPhaseChange({ ...pipeline });
   }
 

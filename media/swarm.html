@@ -191,6 +191,81 @@
       color: var(--text);
     }
 
+    /* ── TAB BUTTONS ── */
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--text); background: var(--bg); }
+    .tab-btn.active { color: var(--accent); background: var(--bg); }
+
+    /* ── CANVAS NODE ── */
+    .canvas-node {
+      position: absolute;
+      width: 180px;
+      background: var(--bg-elevated);
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      cursor: move;
+      z-index: 10;
+      user-select: none;
+      transition: border-color 0.15s;
+    }
+    .canvas-node:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+    .canvas-node .node-header {
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .canvas-node .node-body {
+      padding: 8px 12px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .canvas-node .node-port {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+      cursor: crosshair;
+      z-index: 11;
+      transition: transform 0.15s;
+    }
+    .canvas-node .node-port:hover { transform: scale(1.4); }
+    .canvas-node .node-port.top { top: -7px; left: 50%; margin-left: -6px; }
+    .canvas-node .node-port.bottom { bottom: -7px; left: 50%; margin-left: -6px; }
+    .canvas-node .node-port.left { left: -7px; top: 50%; margin-top: -6px; }
+    .canvas-node .node-port.right { right: -7px; top: 50%; margin-top: -6px; }
+    .canvas-node .node-del-btn {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 10px; padding: 0 2px;
+    }
+    .canvas-node .node-del-btn:hover { color: var(--error); }
+
+    /* ── SVG CONNECTIONS ── */
+    .conn-line { stroke-width: 2.5; fill: none; stroke-linecap: round; cursor: pointer; }
+    .conn-line.enabled { stroke: var(--accent); opacity: 0.7; }
+    .conn-line.disabled { stroke: var(--text-muted); opacity: 0.4; stroke-dasharray: 6,4; }
+    .conn-line:hover { opacity: 1; stroke-width: 3.5; }
+    .conn-label { font-size: 9px; fill: var(--text-muted); cursor: pointer; }
+    .conn-hitarea { stroke-width: 14; fill: none; stroke: transparent; cursor: pointer; }
+
     /* ── MAIN LAYOUT ── */
     .main-layout {
       display: flex;
@@ -986,6 +1061,11 @@
       <div class="header-logo">⚡</div>
       <span class="header-title">CopilotSwarm</span>
     </div>
+    <div class="header-tabs" style="display:flex;gap:2px;margin-left:16px;">
+      <button class="tab-btn active" data-page="main" onclick="showPage('main')">🐝 Main</button>
+      <button class="tab-btn" data-page="pipeline" onclick="showPage('pipeline')">🔧 Pipeline</button>
+      <button class="tab-btn" data-page="skills" onclick="showPage('skills')">🧠 Skills</button>
+    </div>
     <div class="header-actions">
       <div class="header-status" id="auth-status" style="cursor: pointer" onclick="requestAuth()" title="Click to connect Copilot">
         <span class="dot"></span>
@@ -996,7 +1076,8 @@
     </div>
   </div>
 
-  <!-- ═══ MAIN ═══ -->
+  <!-- ═══ PAGE: MAIN (v2.0.1 original) ═══ -->
+  <div class="page page-main" id="page-main">
   <div class="main-layout">
 
     <!-- LEFT: CONTROL PANEL -->
@@ -1114,6 +1195,56 @@
 
     </div>
   </div>
+  </div> <!-- /page-main -->
+
+  <!-- ═══ PAGE: PIPELINE EDITOR ═══ -->
+  <div class="page page-pipeline" id="page-pipeline" style="display:none;flex:1;flex-direction:column;">
+    <div style="display:flex;flex:1;overflow:hidden;">
+      <!-- Left: Agent Palette -->
+      <div style="width:240px;min-width:240px;border-right:1px solid var(--border);background:var(--bg-elevated);display:flex;flex-direction:column;overflow-y:auto;">
+        <div style="padding:12px;border-bottom:1px solid var(--border);">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:8px;">Available Agents</div>
+          <div id="agent-palette" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+        <div style="padding:12px;">
+          <button onclick="showAddAgentDialog()" style="width:100%;padding:8px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);cursor:pointer;font-size:11px;">+ New Agent Skill</button>
+        </div>
+      </div>
+      <!-- Center: Canvas -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        <!-- Toolbar -->
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg-elevated);">
+          <input type="text" id="canvas-pipeline-name" style="flex:1;background:var(--input-bg);color:var(--input-fg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:12px;" placeholder="Pipeline name">
+          <select id="canvas-pipeline-select" style="background:var(--input-bg);color:var(--input-fg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 6px;font-size:11px;" onchange="loadPipelineToCanvas()"></select>
+          <button class="icon-btn" onclick="saveCanvasPipeline()" title="Save Pipeline" style="font-size:11px;padding:4px 10px;width:auto;">💾 Save</button>
+          <button class="icon-btn" onclick="resetCanvasPipeline()" title="Reset" style="font-size:11px;padding:4px 10px;width:auto;">↺ Reset</button>
+          <button class="icon-btn" onclick="deleteCanvasPipeline()" title="Delete Pipeline" style="font-size:11px;padding:4px 10px;width:auto;">🗑</button>
+        </div>
+        <!-- Canvas -->
+        <div id="pipeline-canvas-container" style="flex:1;position:relative;overflow:auto;background:var(--bg);background-image:radial-gradient(circle, var(--border) 1px, transparent 1px);background-size:20px 20px;">
+          <svg id="pipeline-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;"></svg>
+          <div id="pipeline-canvas" style="position:relative;min-width:2000px;min-height:2000px;height:100%;"></div>
+          <div id="canvas-drop-zone" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+            <span style="color:var(--text-muted);opacity:0.3;font-size:14px;">Drag agents here to build your pipeline</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PAGE: AGENT SKILLS ═══ -->
+  <div class="page page-skills" id="page-skills" style="display:none;flex:1;flex-direction:column;overflow-y:auto;">
+    <div style="padding:20px;max-width:700px;margin:0 auto;width:100%;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <h2 style="font-size:16px;font-weight:700;">🧠 Agent Skills</h2>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Custom agents that can be used in any pipeline across all workspaces.</p>
+        </div>
+        <button onclick="showAddAgentDialog()" style="padding:8px 16px;background:var(--accent);color:var(--vscode-button-foreground,white);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:12px;font-weight:600;">+ New Skill</button>
+      </div>
+      <div id="skills-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+  </div>
 
   <!-- ═══ SETTINGS OVERLAY ═══ -->
   <div class="settings-overlay" id="settings-overlay" style="display:none" onclick="closeSettings(event)">
@@ -1180,7 +1311,7 @@
       const vscode = acquireVsCodeApi();
 
       // ── State ──
-      let currentState = { agents: [], config: {}, quota: null, deepseekApiKey: '' };
+      let currentState = { agents: [], config: {}, quota: null, deepseekApiKey: '', pipelines: [], customAgents: [] };
       let availableModels = [];
       let availableDeepseekModels = [];
       let selectedTask = 'feature';
@@ -1204,6 +1335,8 @@
           populateSettingsModels();
           applyConfigToUI();
           updateProviderBadge();
+          initPipelineCanvas();
+          renderSkillsList();
           
           // Refresh current view if an agent is selected
           if (viewingAgentId) viewAgent(viewingAgentId);
@@ -1308,6 +1441,463 @@
         document.getElementById('mode-desc').textContent = descs[mode] || '';
       };
 
+      window.showAddAgentDialog = () => {
+        const name = prompt('Custom agent name:');
+        if (!name) return;
+        const prompt_text = prompt('System prompt for ' + name + ':');
+        if (!prompt_text) return;
+        const model = prompt('Model ID (e.g. deepseek-v4-flash):', availableDeepseekModels[0] || 'gpt-4.1');
+        if (!model) return;
+
+        const agentId = 'custom-' + Date.now();
+        const newAgent = { id: agentId, name, systemPrompt: prompt_text, modelId: model, color: '#10b981' };
+        vscode.postMessage({ type: 'saveAgentSkill', agent: newAgent });
+      };
+
+      // ── Page Navigation ──
+      window.showPage = (page) => {
+        document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+
+        const pageEl = document.getElementById('page-' + page);
+        if (pageEl) {
+          pageEl.style.display = page === 'pipeline' ? 'flex' : (page === 'main' ? '' : 'block');
+        }
+
+        const tab = document.querySelector(`.tab-btn[data-page="${page}"]`);
+        if (tab) tab.classList.add('active');
+
+        if (page === 'pipeline') initPipelineCanvas();
+        else if (page === 'skills') renderSkillsList();
+      };
+
+      // ── Pipeline Canvas ──
+      let canvasNodes = [];
+      let canvasConns = [];
+      let currentCanvasPipelineId = null;
+      let dragState = null; // { type: 'node'|'port'|'canvas', ... }
+
+      function initPipelineCanvas() {
+        const select = document.getElementById('canvas-pipeline-select');
+        const pipelines = currentState.pipelines || [];
+        const curVal = select.value;
+        select.innerHTML = '';
+
+        // Add "New Pipeline" option
+        const newOpt = document.createElement('option');
+        newOpt.value = '__new__';
+        newOpt.textContent = '➕ New Pipeline...';
+        select.appendChild(newOpt);
+
+        pipelines.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = (p.builtIn ? '📦 ' : '🔧 ') + p.name;
+          if (p.id === curVal || (!curVal && p.id === 'pipeline-deep')) opt.selected = true;
+          select.appendChild(opt);
+        });
+
+        if (!curVal) {
+          loadPipelineToCanvas();
+        }
+        renderAgentPalette();
+      }
+
+      function renderAgentPalette() {
+        const palette = document.getElementById('agent-palette');
+        if (!palette) return;
+        palette.innerHTML = '';
+
+        // Built-in agents
+        (currentState.agents || []).forEach(a => {
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:grab;font-size:11px;display:flex;align-items:center;gap:6px;';
+          item.draggable = true;
+          item.innerHTML = `<span>${a.name}</span><span style="font-size:9px;color:var(--text-muted);">${a.modelId}</span>`;
+          item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', a.id);
+            e.dataTransfer.effectAllowed = 'copy';
+          });
+          palette.appendChild(item);
+        });
+
+        // Custom agents
+        (currentState.customAgents || []).forEach(a => {
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:6px 8px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:grab;font-size:11px;display:flex;align-items:center;gap:6px;';
+          item.draggable = true;
+          item.innerHTML = `<span style="color:#10b981;">⚡</span><span>${a.name}</span><span style="font-size:9px;color:var(--text-muted);">${a.modelId}</span>`;
+          item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', a.id);
+            e.dataTransfer.effectAllowed = 'copy';
+          });
+          palette.appendChild(item);
+        });
+      }
+
+      window.loadPipelineToCanvas = () => {
+        const select = document.getElementById('canvas-pipeline-select');
+        const pipelineId = select.value;
+        if (pipelineId === '__new__') {
+          canvasNodes = [];
+          canvasConns = [];
+          currentCanvasPipelineId = null;
+          document.getElementById('canvas-pipeline-name').value = 'My Pipeline';
+          renderCanvas();
+          return;
+        }
+        const pipeline = (currentState.pipelines || []).find(p => p.id === pipelineId);
+        if (!pipeline) return;
+        currentCanvasPipelineId = pipeline.id;
+        document.getElementById('canvas-pipeline-name').value = pipeline.name;
+        canvasNodes = JSON.parse(JSON.stringify(pipeline.nodes));
+        canvasConns = JSON.parse(JSON.stringify(pipeline.connections));
+        renderCanvas();
+      };
+
+      function renderCanvas() {
+        const canvas = document.getElementById('pipeline-canvas');
+        if (!canvas) return;
+
+        // Clear existing nodes (keep SVG)
+        canvas.querySelectorAll('.canvas-node').forEach(n => n.remove());
+
+        const svg = document.getElementById('pipeline-svg');
+        svg.innerHTML = '';
+
+        // Draw connections first (under nodes)
+        canvasConns.forEach(conn => drawConnection(conn));
+
+        // Draw nodes
+        canvasNodes.forEach(node => {
+          const el = document.createElement('div');
+          el.className = 'canvas-node';
+          el.id = 'cn-' + node.id;
+          el.style.left = node.position.x + 'px';
+          el.style.top = node.position.y + 'px';
+
+          const agent = currentState.agents.find(a => a.id === node.agentId) || currentState.customAgents.find(a => a.id === node.agentId);
+          const color = node.agentId.startsWith('custom-') ? '#10b981' : 'var(--accent)';
+
+          el.innerHTML = `
+            <div class="node-header" style="background:${color};color:white;">
+              <span>${node.label || (agent ? agent.name : node.agentId)}</span>
+              <button class="node-del-btn" onclick="deleteCanvasNode('${node.id}')">✕</button>
+            </div>
+            <div class="node-body">${agent ? agent.modelId : ''}</div>
+            <div class="node-port top" data-node-id="${node.id}" data-port="top"></div>
+            <div class="node-port bottom" data-node-id="${node.id}" data-port="bottom"></div>
+          `;
+
+          // Make node draggable
+          el.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('node-del-btn') || e.target.classList.contains('node-port')) return;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const origX = node.position.x;
+            const origY = node.position.y;
+
+            const onMove = (ev) => {
+              const dx = ev.clientX - startX;
+              const dy = ev.clientY - startY;
+              node.position.x = Math.max(0, origX + dx);
+              node.position.y = Math.max(0, origY + dy);
+              el.style.left = node.position.x + 'px';
+              el.style.top = node.position.y + 'px';
+              redrawConnections();
+            };
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          });
+
+          // Port click to create connection
+          el.querySelectorAll('.node-port').forEach(port => {
+            port.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              const fromNodeId = port.dataset.nodeId;
+              const fromPort = port.classList.contains('bottom') ? 'bottom' : 'top';
+
+              if (dragState && dragState.type === 'port') {
+                // Complete connection
+                const toPort = port.classList.contains('top') ? 'top' : 'bottom';
+                if (fromNodeId !== dragState.fromNodeId) {
+                  const connId = 'conn-' + Date.now();
+                  const newConn = {
+                    id: connId,
+                    fromNodeId: dragState.fromNodeId,
+                    toNodeId: fromNodeId,
+                    fromPort: dragState.fromPort === 'bottom' ? 'bottom' : 'bottom',
+                    toPort: toPort === 'top' ? 'top' : 'top',
+                    condition: 'always',
+                    enabled: true,
+                  };
+                  canvasConns.push(newConn);
+                  drawConnection(newConn);
+                  renderCanvasPorts();
+                }
+                // Remove temp line
+                const tempLine = document.getElementById('temp-conn-line');
+                if (tempLine) tempLine.remove();
+                dragState = null;
+              } else {
+                // Start dragging connection
+                dragState = { type: 'port', fromNodeId, fromPort };
+                // Create temp line that follows mouse
+                const tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                tempLine.id = 'temp-conn-line';
+                tempLine.classList.add('conn-line', 'enabled');
+                tempLine.style.pointerEvents = 'none';
+                svg.appendChild(tempLine);
+
+                const onMouseMove = (ev) => {
+                  const rect = svg.getBoundingClientRect();
+                  const fromNode = document.getElementById('cn-' + fromNodeId);
+                  if (!fromNode) return;
+                  const fromRect = fromNode.getBoundingClientRect();
+                  const fromX = fromPort === 'bottom' ? fromRect.left + fromRect.width/2 - rect.left : fromRect.left + fromRect.width/2 - rect.left;
+                  const fromY = fromPort === 'bottom' ? fromRect.bottom - rect.top : fromRect.top - rect.top;
+                  const toX = ev.clientX - rect.left;
+                  const toY = ev.clientY - rect.top;
+                  const d = buildBezierPath(fromX, fromY, toX, toY);
+                  tempLine.setAttribute('d', d);
+                };
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', () => {
+                  document.removeEventListener('mousemove', onMouseMove);
+                  const tl = document.getElementById('temp-conn-line');
+                  if (tl && dragState) tl.remove();
+                  if (dragState && dragState.type === 'port') dragState = null;
+                }, { once: true });
+              }
+            });
+          });
+
+          canvas.appendChild(el);
+        });
+
+        // Show/hide drop zone
+        const dropZone = document.getElementById('canvas-drop-zone');
+        if (dropZone) dropZone.style.display = canvasNodes.length === 0 ? 'flex' : 'none';
+      }
+
+      function renderCanvasPorts() {
+        // Re-render node ports to ensure proper z-ordering
+        // The SVG already redraws connections
+      }
+
+      function drawConnection(conn) {
+        const svg = document.getElementById('pipeline-svg');
+        if (!svg) return;
+        const fromNode = document.getElementById('cn-' + conn.fromNodeId);
+        const toNode = document.getElementById('cn-' + conn.toNodeId);
+        if (!fromNode || !toNode) return;
+
+        const rect = svg.getBoundingClientRect();
+        const fromRect = fromNode.getBoundingClientRect();
+        const toRect = toNode.getBoundingClientRect();
+
+        const fromX = fromRect.left + fromRect.width/2 - rect.left;
+        const fromY = conn.fromPort === 'bottom' ? fromRect.bottom - rect.top : fromRect.top - rect.top;
+        const toX = toRect.left + toRect.width/2 - rect.left;
+        const toY = conn.toPort === 'top' ? toRect.top - rect.top : toRect.bottom - rect.top;
+
+        const d = buildBezierPath(fromX, fromY, toX, toY);
+
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.id = 'svg-conn-' + conn.id;
+
+        // Hit area (invisible wider stroke for easier clicking)
+        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        hit.setAttribute('d', d);
+        hit.classList.add('conn-hitarea');
+        hit.addEventListener('click', () => toggleConnection(conn.id));
+        g.appendChild(hit);
+
+        // Visible line
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        line.setAttribute('d', d);
+        line.classList.add('conn-line');
+        line.classList.add(conn.enabled ? 'enabled' : 'disabled');
+        line.addEventListener('click', () => toggleConnection(conn.id));
+        g.appendChild(line);
+
+        // Arrowhead
+        const arrowSize = 8;
+        const arrowPath = buildArrowhead(fromX, fromY, toX, toY, arrowSize);
+        if (arrowPath) {
+          const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          arrow.setAttribute('d', arrowPath);
+          arrow.style.fill = conn.enabled ? 'var(--accent)' : 'var(--text-muted)';
+          arrow.style.opacity = conn.enabled ? '0.7' : '0.4';
+          arrow.style.cursor = 'pointer';
+          arrow.addEventListener('click', () => toggleConnection(conn.id));
+          g.appendChild(arrow);
+        }
+
+        // Label
+        const midX = (fromX + toX) / 2;
+        const midY = (fromY + toY) / 2;
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', midX);
+        label.setAttribute('y', midY - 8);
+        label.setAttribute('text-anchor', 'middle');
+        label.classList.add('conn-label');
+        label.textContent = conn.enabled ? (conn.condition || 'always') + ' ✓' : '✕ disabled';
+        label.addEventListener('click', () => toggleConnection(conn.id));
+        g.appendChild(label);
+
+        svg.appendChild(g);
+      }
+
+      function buildBezierPath(x1, y1, x2, y2) {
+        const dy = Math.abs(y2 - y1) * 0.5;
+        const cp1x = x1;
+        const cp1y = y1 + (y2 > y1 ? dy : -dy);
+        const cp2x = x2;
+        const cp2y = y2 + (y2 > y1 ? -dy : dy);
+        return `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
+      }
+
+      function buildArrowhead(x1, y1, x2, y2, size) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (len === 0) return null;
+        const ux = dx / len;
+        const uy = dy / len;
+        const px = x2 - ux * 10;
+        const py = y2 - uy * 10;
+        const ax = -uy * size * 0.5;
+        const ay = ux * size * 0.5;
+        return `M ${x2} ${y2} L ${px + ax} ${py + ay} L ${px - ax} ${py - ay} Z`;
+      }
+
+      function redrawConnections() {
+        const svg = document.getElementById('pipeline-svg');
+        if (svg) svg.innerHTML = '';
+        canvasConns.forEach(conn => drawConnection(conn));
+      }
+
+      window.toggleConnection = (connId) => {
+        const conn = canvasConns.find(c => c.id === connId);
+        if (conn) {
+          conn.enabled = !conn.enabled;
+          redrawConnections();
+        }
+      };
+
+      window.deleteCanvasNode = (nodeId) => {
+        canvasNodes = canvasNodes.filter(n => n.id !== nodeId);
+        canvasConns = canvasConns.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId);
+        renderCanvas();
+      };
+
+      // Drag agent from palette to canvas
+      document.addEventListener('DOMContentLoaded', () => {
+        const container = document.getElementById('pipeline-canvas-container');
+        if (!container) return;
+        container.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        container.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const agentId = e.dataTransfer.getData('text/plain');
+          if (!agentId) return;
+
+          const rect = container.getBoundingClientRect();
+          const scrollLeft = container.scrollLeft;
+          const scrollTop = container.scrollTop;
+          const x = e.clientX - rect.left + scrollLeft - 90; // center the 180px wide node
+          const y = e.clientY - rect.top + scrollTop - 30;
+
+          const agent = currentState.agents.find(a => a.id === agentId) || currentState.customAgents.find(a => a.id === agentId);
+          const nodeId = 'node-' + Date.now();
+          const newNode = {
+            id: nodeId,
+            agentId: agentId,
+            label: agent ? agent.name : agentId,
+            position: { x: Math.max(0, x), y: Math.max(0, y) },
+          };
+          canvasNodes.push(newNode);
+          renderCanvas();
+        });
+      });
+
+      window.saveCanvasPipeline = () => {
+        const name = document.getElementById('canvas-pipeline-name').value.trim() || 'Unnamed Pipeline';
+        const pipeline = {
+          id: currentCanvasPipelineId || 'pipeline-' + Date.now(),
+          name: name,
+          description: '',
+          nodes: canvasNodes,
+          connections: canvasConns,
+          builtIn: false,
+          entryNodeId: canvasNodes.length > 0 ? canvasNodes[0].id : '',
+        };
+        currentCanvasPipelineId = pipeline.id;
+        vscode.postMessage({ type: 'savePipeline', pipeline });
+        // Update select
+        const select = document.getElementById('canvas-pipeline-select');
+        const existing = Array.from(select.options).find(o => o.value === pipeline.id);
+        if (!existing) {
+          const opt = document.createElement('option');
+          opt.value = pipeline.id;
+          opt.textContent = '🔧 ' + pipeline.name;
+          opt.selected = true;
+          select.insertBefore(opt, select.lastElementChild); // before "New Pipeline"
+        } else {
+          existing.textContent = '🔧 ' + pipeline.name;
+        }
+      };
+
+      window.resetCanvasPipeline = () => {
+        if (!currentCanvasPipelineId) { canvasNodes = []; canvasConns = []; renderCanvas(); return; }
+        loadPipelineToCanvas();
+      };
+
+      window.deleteCanvasPipeline = () => {
+        if (!currentCanvasPipelineId || currentCanvasPipelineId.startsWith('pipeline-deep') || currentCanvasPipelineId.startsWith('pipeline-quick')) return;
+        vscode.postMessage({ type: 'deletePipeline', pipelineId: currentCanvasPipelineId });
+        currentCanvasPipelineId = null;
+        canvasNodes = [];
+        canvasConns = [];
+        document.getElementById('canvas-pipeline-name').value = '';
+        initPipelineCanvas();
+        renderCanvas();
+      };
+
+      // ── Agent Skills Page ──
+      function renderSkillsList() {
+        const list = document.getElementById('skills-list');
+        if (!list) return;
+        const skills = currentState.customAgents || [];
+        if (skills.length === 0) {
+          list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No custom agent skills yet. Click "+ New Skill" to create one.</div>';
+          return;
+        }
+        list.innerHTML = '';
+        skills.forEach(s => {
+          const card = document.createElement('div');
+          card.style.cssText = 'padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:12px;';
+          card.innerHTML = `
+            <span style="font-size:18px;">⚡</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:600;">${escapeHtml(s.name)}</div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Model: ${escapeHtml(s.modelId)}</div>
+              <div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px;">${escapeHtml(s.systemPrompt.substring(0, 100))}${s.systemPrompt.length > 100 ? '...' : ''}</div>
+            </div>
+            <button onclick="deleteSkill('${s.id}')" style="background:none;border:none;color:var(--error);cursor:pointer;font-size:11px;padding:4px 8px;">Delete</button>
+          `;
+          list.appendChild(card);
+        });
+      }
+
+      window.deleteSkill = (id) => {
+        vscode.postMessage({ type: 'deleteAgentSkill', agentId: id });
+      };
+
       // ── Run ──
       window.handleRun = () => {
         const objective = document.getElementById('obj-input').value.trim();
@@ -1330,6 +1920,7 @@
           objective,
           taskType: selectedTask,
           mode: selectedMode,
+          pipelineId: null, // use default mode logic (quick/deep)
         });
       };
 

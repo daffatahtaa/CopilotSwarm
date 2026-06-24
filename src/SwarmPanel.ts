@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { AgentStore } from './AgentStore';
 import { SwarmEngine } from './SwarmEngine';
-import { TaskType, SwarmMode, ProviderType, PipelineState, TASK_TYPE_META } from './types';
+import { TaskType, SwarmMode, ProviderType, PipelineState, PipelineDefinition, CustomAgentDef, TASK_TYPE_META } from './types';
 import { DEEPSEEK_MODELS } from './aliases';
 
 export class SwarmPanel {
@@ -51,6 +51,7 @@ export class SwarmPanel {
             (agentId, chunk) => this._panel.webview.postMessage({ type: 'streamChunk', agentId, chunk }),
             (action) => this._panel.webview.postMessage({ type: 'fileAction', action }),
             (pipeline) => this._panel.webview.postMessage({ type: 'pipelineUpdate', pipeline }),
+            msg.pipelineId as string | undefined,
           );
           break;
         }
@@ -100,6 +101,33 @@ export class SwarmPanel {
           }
           break;
         }
+        case 'savePipeline': {
+          await this._store.savePipeline(msg.pipeline as PipelineDefinition);
+          this._updateState();
+          break;
+        }
+        case 'deletePipeline': {
+          await this._store.deletePipeline(msg.pipelineId as string);
+          this._updateState();
+          break;
+        }
+        case 'resetPipelines': {
+          await this._store.resetPipelinesToDefault();
+          this._updateState();
+          break;
+        }
+        case 'saveCustomAgent':
+        case 'saveAgentSkill': {
+          await this._store.saveCustomAgent(msg.agent as CustomAgentDef);
+          this._updateState();
+          break;
+        }
+        case 'deleteCustomAgent':
+        case 'deleteAgentSkill': {
+          await this._store.deleteCustomAgent(msg.agentId as string);
+          this._updateState();
+          break;
+        }
         case 'updateConfig': {
           // Handle DeepSeek API key separately (stored in SecretStorage)
           if (msg.config.deepseekApiKey !== undefined) {
@@ -146,6 +174,9 @@ export class SwarmPanel {
         config: this._store.getConfig(),
         quota,
         deepseekApiKey: this._store.getDeepSeekApiKey(),
+        pipelines: this._store.getPipelines(),
+        customAgents: this._store.getCustomAgents(),
+        agentSkills: this._store.getAgentSkills(),
       },
       availableModels: copilotModels.map(m => m.id),
       availableDeepseekModels: deepseekModels.map(m => m.id),
