@@ -27,6 +27,9 @@ export const TASK_TYPE_META: Record<TaskType, { label: string; icon: string; des
   debug:    { label: 'Debug & Fix',        icon: '⚡', description: 'Find root cause and solve bugs',          color: '#f59e0b' },
 };
 
+// ── Provider Type (GitHub Copilot or DeepSeek) ──
+export type ProviderType = 'github-copilot' | 'deepseek';
+
 // ── Swarm Modes ──
 export type SwarmMode = 'quick' | 'deep' | 'auto';
 
@@ -42,19 +45,26 @@ export interface PipelineState {
   summary?: string;
 }
 
+// ── Secret Storage key for DeepSeek API key ──
+export const DEEPSEEK_SECRET_KEY = 'copilotswarm.deepseekApiKey';
+
 // ── User Config (Advanced Settings) ──
 export interface SwarmConfig {
   defaultMode: SwarmMode;
   plannerModel: string;   // Model for Planner + Architect
   coderModel: string;     // Model for Coder
+  arbitratorModel: string; // Model for Arbitrator
   tokenBudget: number;    // Max tokens per task (0 = unlimited)
+  provider: ProviderType; // 'github-copilot' | 'deepseek'
 }
 
 export const DEFAULT_CONFIG: SwarmConfig = {
   defaultMode: 'auto',
   plannerModel: '',       // Empty = use whatever Copilot provides
   coderModel: '',
+  arbitratorModel: '',
   tokenBudget: 0,
+  provider: 'github-copilot',
 };
 
 // ── Swarm State (sent to webview) ──
@@ -68,6 +78,7 @@ export interface SwarmState {
     limit: number;
     unit: string;
   } | null;
+  deepseekApiKey?: string;
 }
 
 // ── Legacy compat ──

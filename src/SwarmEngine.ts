@@ -1,11 +1,16 @@
 import * as vscode from 'vscode';
 import { AgentStore } from './AgentStore';
-import { TaskType, SwarmMode, AgentRole, PipelineState, TASK_TYPE_META } from './types';
+import { TaskType, SwarmMode, AgentRole, ProviderType, PipelineState, TASK_TYPE_META } from './types';
 
 export class SwarmEngine {
   private _isStopped = false;
+  private _deepseekApiKey: string = '';
+  private _provider: ProviderType = 'github-copilot';
 
   constructor(private readonly _store: AgentStore) {}
+
+  public setDeepSeekApiKey(key: string) { this._deepseekApiKey = key; }
+  public setProvider(provider: ProviderType) { this._provider = provider; }
 
   // ── Smart Auto-Mode Detection ──
   public resolveMode(input: string, preferredMode: SwarmMode): 'quick' | 'deep' {
@@ -294,23 +299,32 @@ export class SwarmEngine {
     if (!agent) return '';
     this._store.patch(id, { status: 'running', objective, lastResponse: '' });
 
+    let prompt = `Role: ${systemPrompt}\n\nObjective: ${objective}\n\n${context}${history}\n\n`;
+    prompt += `!!! AUTONOMOUS DIRECTIVE !!!\n`;
+    prompt += `1. DO NOT ask for permission. DO NOT say "I can help with that".\n`;
+    prompt += `2. If files need changing, write them IMMEDIATELY using the [WRITE_FILE: path] format.\n`;
+    prompt += `3. Be cold and efficient. No conversational filler. Avoid explaining what you will do, just do it.\n`;
+    prompt += `4. If you finish, do not ask for the next step. Just output your result.\n\n`;
+    prompt += `Format for file changes:\n[WRITE_FILE: relative/path/file.ext]\nContent\n[/WRITE_FILE]`;
+
+    if (this._provider === 'github-copilot') {
+      return this._runCopilotAgent(id, modelId, prompt, onChunk);
+    } else {
+      return this._runDeepSeekAgent(id, modelId, systemPrompt, prompt, onChunk);
+    }
+  }
+
+  private async _runCopilotAgent(
+    id: string, modelId: string, prompt: string,
+    onChunk?: (agentId: string, chunk: string) => void,
+  ): Promise<string> {
     try {
       const authModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
       if (!authModels || authModels.length === 0) {
         throw new Error("No Copilot models found. Ensure Copilot Chat is installed and authenticated.");
       }
-      
-      // The modelId in AgentStore is already synchronized with user settings
-      const preferredModel = agent.modelId;
-      const model = authModels.find(m => m.id === preferredModel) || authModels[0];
-      
-      let prompt = `Role: ${systemPrompt}\n\nObjective: ${objective}\n\n${context}${history}\n\n`;
-      prompt += `!!! AUTONOMOUS DIRECTIVE !!!\n`;
-      prompt += `1. DO NOT ask for permission. DO NOT say "I can help with that".\n`;
-      prompt += `2. If files need changing, write them IMMEDIATELY using the [WRITE_FILE: path] format.\n`;
-      prompt += `3. Be cold and efficient. No conversational filler. Avoid explaining what you will do, just do it.\n`;
-      prompt += `4. If you finish, do not ask for the next step. Just output your result.\n\n`;
-      prompt += `Format for file changes:\n[WRITE_FILE: relative/path/file.ext]\nContent\n[/WRITE_FILE]`;
+
+      const model = authModels.find(m => m.id === modelId) || authModels[0];
 
       const request = await model.sendRequest(
         [vscode.LanguageModelChatMessage.User(prompt)],
@@ -323,6 +337,81 @@ export class SwarmEngine {
         if (this._isStopped) break;
         fullResponse += chunk;
         if (onChunk) onChunk(id, chunk);
+      }
+
+      this._store.incrementTotalTokens(Math.floor((fullResponse.length + prompt.length) / 4));
+      this._store.patch(id, { status: 'success', lastResponse: fullResponse.trim() });
+      return fullResponse.trim();
+    } catch (err: any) {
+      this._store.patch(id, { status: 'error', lastResponse: `Error: ${err.message}` });
+      return '';
+    }
+  }
+
+  private async _runDeepSeekAgent(
+    id: string, modelId: string, systemPrompt: string, prompt: string,
+    onChunk?: (agentId: string, chunk: string) => void,
+  ): Promise<string> {
+    try {
+      if (!this._deepseekApiKey) {
+        throw new Error("DeepSeek API key is not set. Go to Settings and enter your API key.");
+      }
+
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this._deepseekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt },
+          ],
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(`DeepSeek API error ${response.status}: ${response.statusText}${errorBody ? ' — ' + errorBody.slice(0, 200) : ''}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('DeepSeek: response body is not readable');
+
+      const decoder = new TextDecoder();
+      let fullResponse = '';
+      let buffer = '';
+
+      while (true) {
+        if (this._isStopped) { reader.cancel(); break; }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullResponse += delta;
+              if (onChunk) onChunk(id, delta);
+            }
+          } catch {
+            // Skip malformed JSON chunks
+          }
+        }
       }
 
       this._store.incrementTotalTokens(Math.floor((fullResponse.length + prompt.length) / 4));

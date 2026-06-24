@@ -50,6 +50,15 @@ export const ALIAS_MAP: Record<string, string> = {
   'raptor':                     'raptor-mini',
   'raptor mini':                'raptor-mini',
   'goldeneye':                  'goldeneye',
+
+  'deepseek v4 flash':          'deepseek-v4-flash',
+  'deepseek flash':             'deepseek-v4-flash',
+  'deepseek-v4-flash':          'deepseek-v4-flash',
+  'ds flash':                   'deepseek-v4-flash',
+  'deepseek v4 pro':            'deepseek-v4-pro',
+  'deepseek pro':               'deepseek-v4-pro',
+  'deepseek-v4-pro':            'deepseek-v4-pro',
+  'ds pro':                     'deepseek-v4-pro',
 };
 
 export type CopilotModel = {
@@ -257,4 +266,25 @@ export const COPILOT_MODELS: CopilotModel[] = [
   },
 ];
 
-const KNOWN_MODEL_IDS: string[] = COPILOT_MODELS.map(m => m.id);
+export const DEEPSEEK_MODELS: CopilotModel[] = [
+  {
+    id: 'deepseek-v4-flash',
+    provider: 'DeepSeek',
+    status: 'ga',
+    multiplierPaid: null,
+    multiplierFree: null,
+    plans: { free: false, student: false, pro: false, proPlusAndBusiness: false, enterprise: false },
+    taskArea: 'general',
+  },
+  {
+    id: 'deepseek-v4-pro',
+    provider: 'DeepSeek',
+    status: 'ga',
+    multiplierPaid: null,
+    multiplierFree: null,
+    plans: { free: false, student: false, pro: false, proPlusAndBusiness: false, enterprise: false },
+    taskArea: 'reasoning',
+  },
+];
+
+const KNOWN_MODEL_IDS: string[] = [...COPILOT_MODELS.map(m => m.id), ...DEEPSEEK_MODELS.map(m => m.id)];

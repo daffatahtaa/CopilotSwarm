@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AgentState, AgentRole, SwarmConfig, DEFAULT_CONFIG } from './types';
+import { AgentState, AgentRole, SwarmConfig, DEFAULT_CONFIG, DEEPSEEK_SECRET_KEY } from './types';
 
 const ROLE_DEFAULTS: Record<AgentRole, { name: string; systemPrompt: string; defaultModel: string }> = {
   planner: {
@@ -29,11 +29,19 @@ export class AgentStore {
   private _totalTokens: number = 0;
   private _config: SwarmConfig = { ...DEFAULT_CONFIG };
   private _deepModeCount: number = 0; // Track consecutive deep mode uses
+  private _deepseekApiKey: string = '';
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   public readonly onDidChange = this._onDidChange.event;
 
   constructor(private readonly _context: vscode.ExtensionContext) {
-    this._load();
+    this._loadConfig();
+    // Fire-and-forget secret load; callers can await init() if needed
+    this._loadSecret();
+  }
+
+  // ── Async Initialization (load secret from OS keychain) ──
+  public async init(): Promise<void> {
+    await this._loadSecret();
   }
 
   // ── Agent Access ──
@@ -45,6 +53,32 @@ export class AgentStore {
   public getTokenLimit(): number { return this._config.tokenBudget; }
   public setTokenLimit(limit: number) { this._config.tokenBudget = limit; this._save(); }
   public incrementTotalTokens(amount: number) { this._totalTokens += amount; this._save(); }
+
+  // ── DeepSeek API Key (stored in SecretStorage / OS keychain) ──
+  public getDeepSeekApiKey(): string {
+    return this._deepseekApiKey;
+  }
+
+  public async setDeepSeekApiKey(key: string): Promise<void> {
+    this._deepseekApiKey = key;
+    if (key) {
+      await this._context.secrets.store(DEEPSEEK_SECRET_KEY, key);
+    } else {
+      await this._context.secrets.delete(DEEPSEEK_SECRET_KEY);
+    }
+  }
+
+  public async loadSecretFromStorage(): Promise<void> {
+    await this._loadSecret();
+  }
+
+  private async _loadSecret(): Promise<void> {
+    try {
+      this._deepseekApiKey = await this._context.secrets.get(DEEPSEEK_SECRET_KEY) || '';
+    } catch {
+      this._deepseekApiKey = '';
+    }
+  }
 
   // ── Config ──
   public getConfig(): SwarmConfig { return { ...this._config }; }
@@ -63,9 +97,12 @@ export class AgentStore {
       } else if (agent.role === 'coder') {
         agent.modelId = this._config.coderModel || (def?.defaultModel ?? 'gpt-4.1');
       } else if (agent.role === 'arbitrator') {
-        // Arbitrator always keeps its own default (claude-sonnet-4.6) unless explicitly overridden
-        // It is NOT affected by plannerModel - it has the best model by design
-        agent.modelId = def?.defaultModel ?? 'claude-sonnet-4.6';
+        // Provider-aware default: DeepSeek uses deepseek-v4-pro, Copilot uses claude-sonnet-4.6
+        // User can override via arbitratorModel setting
+        const deepseekDefault = 'deepseek-v4-pro';
+        const copilotDefault = def?.defaultModel ?? 'claude-sonnet-4.6';
+        const providerDefault = this._config.provider === 'deepseek' ? deepseekDefault : copilotDefault;
+        agent.modelId = this._config.arbitratorModel || providerDefault;
       }
     });
   }
@@ -100,7 +137,7 @@ export class AgentStore {
   }
 
   // ── Persistence ──
-  private _load() {
+  private _loadConfig() {
     this._totalTokens = this._context.globalState.get<number>('swarm.totalTokens', 0);
     this._deepModeCount = this._context.globalState.get<number>('swarm.deepModeCount', 0);
     

@@ -991,6 +991,7 @@
         <span class="dot"></span>
         <span id="auth-label">Connecting...</span>
       </div>
+      <span class="provider-badge" id="provider-badge" style="font-size:11px;color:var(--text-muted);padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);">🔷 Copilot</span>
       <button class="icon-btn" id="btn-settings" title="Advanced Settings">⚙</button>
     </div>
   </div>
@@ -1133,8 +1134,28 @@
           <div class="setting-label">Model for Coder</div>
           <div class="setting-hint">Used for writing code. Faster models save requests.</div>
           <select class="setting-select" id="cfg-coder-model">
-            <option value="">Default (use Copilot's model)</option>
+            <option value="">Default (auto-detect)</option>
           </select>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Model for Arbitrator</div>
+          <div class="setting-hint">Reviewer agent that verifies output and fixes bugs. The best model should be used here.</div>
+          <select class="setting-select" id="cfg-arbitrator-model">
+            <option value="">Default (auto-detect)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">AI Provider</div>
+          <div class="setting-hint">Choose which AI backend to use. DeepSeek requires an API key.</div>
+          <select class="setting-select" id="cfg-provider" onchange="toggleDeepSeekKeyField()">
+            <option value="github-copilot">GitHub Copilot</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </div>
+        <div class="setting-group" id="cfg-deepseek-key-group" style="display:none">
+          <div class="setting-label">DeepSeek API Key</div>
+          <div class="setting-hint">Your DeepSeek API key (stored securely in OS keychain). Get one at <a href="https://platform.deepseek.com" style="color:var(--accent)">platform.deepseek.com</a></div>
+          <input type="password" class="setting-input" id="cfg-deepseek-key" placeholder="sk-..." autocomplete="off">
         </div>
         <div class="setting-group">
           <div class="setting-label">Default Processing Mode</div>
@@ -1159,8 +1180,9 @@
       const vscode = acquireVsCodeApi();
 
       // ── State ──
-      let currentState = { agents: [], config: {}, quota: null };
+      let currentState = { agents: [], config: {}, quota: null, deepseekApiKey: '' };
       let availableModels = [];
+      let availableDeepseekModels = [];
       let selectedTask = 'feature';
       let selectedMode = 'auto';
       let viewingAgentId = null;
@@ -1177,9 +1199,11 @@
         if (msg.type === 'state') {
           currentState = msg.state;
           availableModels = msg.availableModels || [];
+          availableDeepseekModels = msg.availableDeepseekModels || [];
           updateAuthUI();
           populateSettingsModels();
           applyConfigToUI();
+          updateProviderBadge();
           
           // Refresh current view if an agent is selected
           if (viewingAgentId) viewAgent(viewingAgentId);
@@ -1540,12 +1564,20 @@
 
       document.getElementById('btn-settings').onclick = toggleSettings;
 
+      function getProviderModels() {
+        const provider = document.getElementById('cfg-provider').value;
+        if (provider === 'deepseek') return availableDeepseekModels;
+        return availableModels;
+      }
+
       function populateSettingsModels() {
-        ['cfg-planner-model', 'cfg-coder-model'].forEach(id => {
+        ['cfg-planner-model', 'cfg-coder-model', 'cfg-arbitrator-model'].forEach(id => {
           const select = document.getElementById(id);
+          if (!select) return;
           const current = select.value;
           select.innerHTML = '<option value="">Default (auto-detect)</option>';
-          availableModels.forEach(m => {
+          const models = getProviderModels();
+          models.forEach(m => {
             const opt = document.createElement('option');
             opt.value = m;
             opt.textContent = m;
@@ -1555,12 +1587,39 @@
         });
       }
 
+      window.toggleDeepSeekKeyField = () => {
+        const provider = document.getElementById('cfg-provider').value;
+        const keyGroup = document.getElementById('cfg-deepseek-key-group');
+        keyGroup.style.display = provider === 'deepseek' ? 'block' : 'none';
+        // Re-populate model dropdowns when provider changes (different model lists)
+        populateSettingsModels();
+      };
+
+      function updateProviderBadge() {
+        const badge = document.getElementById('provider-badge');
+        if (!badge) return;
+        const cfg = currentState.config || {};
+        if (cfg.provider === 'deepseek') {
+          badge.textContent = '🟢 DeepSeek';
+        } else {
+          badge.textContent = '🔷 Copilot';
+        }
+      }
+
       function applyConfigToUI() {
         if (!currentState.config) return;
         const cfg = currentState.config;
 
+        if (cfg.provider) {
+          document.getElementById('cfg-provider').value = cfg.provider;
+          toggleDeepSeekKeyField();
+        }
+        if (currentState.deepseekApiKey) {
+          document.getElementById('cfg-deepseek-key').value = currentState.deepseekApiKey;
+        }
         if (cfg.plannerModel) document.getElementById('cfg-planner-model').value = cfg.plannerModel;
         if (cfg.coderModel) document.getElementById('cfg-coder-model').value = cfg.coderModel;
+        if (cfg.arbitratorModel) document.getElementById('cfg-arbitrator-model').value = cfg.arbitratorModel;
         if (cfg.defaultMode) {
           document.getElementById('cfg-default-mode').value = cfg.defaultMode;
           // Apply default mode to toggle if not already changed by user
@@ -1575,8 +1634,11 @@
           config: {
             plannerModel: document.getElementById('cfg-planner-model').value,
             coderModel: document.getElementById('cfg-coder-model').value,
+            arbitratorModel: document.getElementById('cfg-arbitrator-model').value,
             defaultMode: document.getElementById('cfg-default-mode').value,
             tokenBudget: parseInt(document.getElementById('cfg-budget').value) || 0,
+            provider: document.getElementById('cfg-provider').value,
+            deepseekApiKey: document.getElementById('cfg-deepseek-key').value,
           }
         });
         toggleSettings();

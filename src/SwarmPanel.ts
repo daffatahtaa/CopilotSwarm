@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { AgentStore } from './AgentStore';
 import { SwarmEngine } from './SwarmEngine';
-import { TaskType, SwarmMode, PipelineState, TASK_TYPE_META } from './types';
+import { TaskType, SwarmMode, ProviderType, PipelineState, TASK_TYPE_META } from './types';
+import { DEEPSEEK_MODELS } from './aliases';
 
 export class SwarmPanel {
   public static currentPanel: SwarmPanel | undefined;
@@ -20,6 +21,11 @@ export class SwarmPanel {
     this._panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.type) {
         case 'run': {
+          // Wire provider + API key to engine before run
+          const config = this._store.getConfig();
+          this._engine.setProvider(config.provider);
+          this._engine.setDeepSeekApiKey(this._store.getDeepSeekApiKey());
+
           // Budget warning check
           const resolvedMode = this._engine.resolveMode(msg.objective, msg.mode as SwarmMode);
           if (resolvedMode === 'deep' && this._engine.shouldWarnBudget()) {
@@ -95,7 +101,13 @@ export class SwarmPanel {
           break;
         }
         case 'updateConfig': {
-          this._store.updateConfig(msg.config);
+          // Handle DeepSeek API key separately (stored in SecretStorage)
+          if (msg.config.deepseekApiKey !== undefined) {
+            await this._store.setDeepSeekApiKey(msg.config.deepseekApiKey);
+          }
+          // Strip deepseekApiKey before passing to config (stored in SecretStorage, not globalState)
+          const { deepseekApiKey, ...configPatch } = msg.config;
+          this._store.updateConfig(configPatch);
           this._updateState();
           break;
         }
@@ -113,7 +125,7 @@ export class SwarmPanel {
   }
 
   private async _updateState() {
-    const authModels = await this._getAuthModels();
+    const { copilotModels, deepseekModels } = await this._getAuthModels();
     let quota = null;
     try {
       const session = await vscode.authentication.getSession('github', ['user:email'], { createIfNone: false });
@@ -133,13 +145,17 @@ export class SwarmPanel {
         agents: this._store.all(),
         config: this._store.getConfig(),
         quota,
+        deepseekApiKey: this._store.getDeepSeekApiKey(),
       },
-      availableModels: authModels.map(m => m.id),
+      availableModels: copilotModels.map(m => m.id),
+      availableDeepseekModels: deepseekModels.map(m => m.id),
     });
   }
 
-  private async _getAuthModels() {
-    try { return await vscode.lm.selectChatModels({ vendor: 'copilot' }); } catch { return []; }
+  private async _getAuthModels(): Promise<{ copilotModels: any[]; deepseekModels: typeof DEEPSEEK_MODELS }> {
+    let copilotModels: any[] = [];
+    try { copilotModels = await vscode.lm.selectChatModels({ vendor: 'copilot' }); } catch {}
+    return { copilotModels, deepseekModels: DEEPSEEK_MODELS };
   }
 
   public static createOrShow(extensionUri: vscode.Uri, store: AgentStore, engine: SwarmEngine) {
